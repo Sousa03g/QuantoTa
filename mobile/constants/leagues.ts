@@ -41,3 +41,7 @@ export const allLeagues: League[] = [
   { id: 15, name: "Copa América", country: "América do Sul", flag: "🌎" },
   { id: 5, name: "Nations League", country: "Europa", flag: "🇪🇺" },
 ];
+
+// Aliases for compatibility with different import conventions
+export const POPULAR_LEAGUES = popularLeagues;
+export const ALL_LEAGUES = allLeagues;
