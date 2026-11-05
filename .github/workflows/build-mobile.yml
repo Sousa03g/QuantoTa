@@ -167,9 +167,9 @@ jobs:
 
           if [ -n "$BUILD_URL" ]; then
             ARTIFACT_NAME="QuantoTa-${{ needs.version-bump.outputs.version }}.apk"
-            curl -L -o "../$ARTIFACT_NAME" "$BUILD_URL"
+            curl -L -o "$GITHUB_WORKSPACE/$ARTIFACT_NAME" "$BUILD_URL"
             echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
-            echo "artifact_path=$(pwd)/../$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+            echo "artifact_path=$GITHUB_WORKSPACE/$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
           fi
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -227,9 +227,9 @@ jobs:
 
           if [ -n "$BUILD_URL" ]; then
             ARTIFACT_NAME="QuantoTa-${{ needs.version-bump.outputs.version }}.ipa"
-            curl -L -o "../$ARTIFACT_NAME" "$BUILD_URL"
+            curl -L -o "$GITHUB_WORKSPACE/$ARTIFACT_NAME" "$BUILD_URL"
             echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
-            echo "artifact_path=$(pwd)/../$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+            echo "artifact_path=$GITHUB_WORKSPACE/$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
           fi
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
