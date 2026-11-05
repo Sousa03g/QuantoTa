@@ -8,11 +8,17 @@
 
 import axios, { AxiosInstance } from "axios";
 
-/** Configured axios instance for API-Football. */
+const apiKey = process.env.FOOTBALL_API_KEY ?? "";
+const isRapidApi = apiKey.includes("msh") || process.env.FOOTBALL_API_HOST?.includes("rapidapi");
+const host = process.env.FOOTBALL_API_HOST ?? (isRapidApi ? "api-football-v1.p.rapidapi.com" : "v3.football.api-sports.io");
+
+/** Configured axios instance for API-Football (supports RapidAPI and API-Sports). */
 const api: AxiosInstance = axios.create({
-  baseURL: `https://${process.env.FOOTBALL_API_HOST ?? "v3.football.api-sports.io"}`,
+  baseURL: `https://${host}`,
   headers: {
-    "x-apisports-key": process.env.FOOTBALL_API_KEY ?? "",
+    "x-rapidapi-key": apiKey,
+    "x-rapidapi-host": host,
+    "x-apisports-key": apiKey,
   },
   timeout: 15_000,
 });
