@@ -43,6 +43,9 @@
     "extra": {
       "router": {
         "origin": false
+      },
+      "eas": {
+        "projectId": "76824d23-bcc7-45b2-848b-88185a9c091c"
       }
     },
     "owner": "03sousag"
