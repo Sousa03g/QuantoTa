@@ -43,10 +43,8 @@
     "extra": {
       "router": {
         "origin": false
-      },
-      "eas": {
-        "projectId": "your-project-id"
       }
-    }
+    },
+    "owner": "03sousag"
   }
 }

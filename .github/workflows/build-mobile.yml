@@ -150,6 +150,7 @@ jobs:
             echo "::warning::EXPO_TOKEN is not set. Please set the EXPO_TOKEN secret in GitHub repository settings."
             exit 1
           fi
+          npx eas-cli project:init --force || true
           npx eas-cli build --platform android --profile preview --non-interactive --wait
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
