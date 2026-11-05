@@ -1,0 +1,117 @@
+name: 🔢 Version Bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    name: 🔢 Bump Version
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📦 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 🔢 Read current version
+        id: current
+        run: |
+          CURRENT_VERSION=$(node -p "require('./mobile/app.json').expo.version")
+          echo "version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "📌 Current version: $CURRENT_VERSION"
+
+      - name: 🔼 Calculate new version
+        id: new
+        run: |
+          CURRENT="${{ steps.current.outputs.version }}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          BUMP_TYPE="${{ github.event.inputs.bump }}"
+
+          case "$BUMP_TYPE" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          VERSION_CODE=$(( MAJOR * 10000 + MINOR * 100 + PATCH ))
+
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "🆕 New version: $NEW_VERSION (code: $VERSION_CODE)"
+
+      - name: 📝 Update app.json
+        run: |
+          node -e "
+            const fs = require('fs');
+            const appJson = JSON.parse(fs.readFileSync('./mobile/app.json', 'utf8'));
+            appJson.expo.version = '${{ steps.new.outputs.version }}';
+            appJson.expo.android = appJson.expo.android || {};
+            appJson.expo.android.versionCode = ${{ steps.new.outputs.version_code }};
+            appJson.expo.ios = appJson.expo.ios || {};
+            appJson.expo.ios.buildNumber = '${{ steps.new.outputs.version }}';
+            fs.writeFileSync('./mobile/app.json', JSON.stringify(appJson, null, 2) + '\n');
+          "
+
+      - name: 📝 Update root package.json
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('./package.json', 'utf8'));
+            pkg.version = '${{ steps.new.outputs.version }}';
+            fs.writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: 💾 Commit and push version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add mobile/app.json package.json
+          git commit -m "chore: bump version to ${{ steps.new.outputs.version }}"
+          git push
+
+      - name: 🏷️ Create and push git tag
+        run: |
+          git tag -a "${{ steps.new.outputs.tag }}" -m "Version ${{ steps.new.outputs.version }}"
+          git push origin "${{ steps.new.outputs.tag }}"
+
+      - name: 📋 Summary
+        run: |
+          echo "## 🔢 Version Bump Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Detail | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Previous** | \`${{ steps.current.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **New** | \`${{ steps.new.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Bump type** | \`${{ github.event.inputs.bump }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version code** | \`${{ steps.new.outputs.version_code }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tag** | \`${{ steps.new.outputs.tag }}\` |" >> $GITHUB_STEP_SUMMARY

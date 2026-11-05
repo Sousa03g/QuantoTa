@@ -1,0 +1,307 @@
+name: 📱 Build Mobile App
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/build-mobile.yml'
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build'
+        required: true
+        default: 'android'
+        type: choice
+        options:
+          - android
+          - ios
+          - all
+      bump:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+env:
+  EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+  NODE_ENV: production
+
+jobs:
+  version-bump:
+    name: 🔢 Bump Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      version_code: ${{ steps.bump.outputs.version_code }}
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔢 Determine bump type and bump version
+        id: bump
+        run: |
+          # Read current version from app.json
+          CURRENT_VERSION=$(node -p "require('./mobile/app.json').expo.version")
+          echo "Current version: $CURRENT_VERSION"
+
+          # Parse major.minor.patch
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+
+          # Determine bump type
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            BUMP_TYPE="${{ github.event.inputs.bump }}"
+          else
+            # Auto-detect from commit message
+            COMMIT_MSG=$(git log -1 --pretty=%B)
+            if echo "$COMMIT_MSG" | grep -qi "BREAKING:"; then
+              BUMP_TYPE="major"
+            elif echo "$COMMIT_MSG" | grep -qi "feat:"; then
+              BUMP_TYPE="minor"
+            else
+              BUMP_TYPE="patch"
+            fi
+          fi
+
+          echo "Bump type: $BUMP_TYPE"
+
+          # Apply bump
+          case "$BUMP_TYPE" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          # versionCode = MAJOR * 10000 + MINOR * 100 + PATCH
+          VERSION_CODE=$(( MAJOR * 10000 + MINOR * 100 + PATCH ))
+
+          echo "New version: $NEW_VERSION"
+          echo "Version code: $VERSION_CODE"
+
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: 📝 Update app.json with new version
+        run: |
+          node -e "
+            const fs = require('fs');
+            const appJson = JSON.parse(fs.readFileSync('./mobile/app.json', 'utf8'));
+            appJson.expo.version = '${{ steps.bump.outputs.version }}';
+            appJson.expo.android = appJson.expo.android || {};
+            appJson.expo.android.versionCode = ${{ steps.bump.outputs.version_code }};
+            appJson.expo.ios = appJson.expo.ios || {};
+            appJson.expo.ios.buildNumber = '${{ steps.bump.outputs.version }}';
+            fs.writeFileSync('./mobile/app.json', JSON.stringify(appJson, null, 2) + '\n');
+          "
+
+      - name: 💾 Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add mobile/app.json
+          git diff --staged --quiet && echo "No changes to commit" || {
+            git commit -m "chore: bump version to ${{ steps.bump.outputs.version }} [skip ci]"
+            git push
+          }
+
+  build-android:
+    name: 🤖 Build Android APK
+    needs: version-bump
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'push' ||
+      github.event.inputs.platform == 'android' ||
+      github.event.inputs.platform == 'all'
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: 📦 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📥 Install dependencies
+        run: npm ci --workspace=mobile
+
+      - name: 🔧 Setup Expo & EAS CLI
+        run: |
+          npm install -g expo-cli
+          npm install -g eas-cli
+
+      - name: 🏗️ Build Android APK with EAS
+        run: |
+          cd mobile
+          npx eas-cli build --platform android --profile preview --non-interactive --wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 📥 Download Android artifact from EAS
+        id: download_android
+        run: |
+          cd mobile
+          # Get the latest build URL for Android
+          BUILD_URL=$(npx eas-cli build:list --platform android --status finished --limit 1 --json --non-interactive | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'))[0].artifacts.buildUrl")
+          echo "Build URL: $BUILD_URL"
+
+          # Download the APK
+          ARTIFACT_NAME="QuantoTa-${{ needs.version-bump.outputs.version }}.apk"
+          curl -L -o "../$ARTIFACT_NAME" "$BUILD_URL"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+          echo "artifact_path=$(pwd)/../$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 📤 Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: ${{ steps.download_android.outputs.artifact_path }}
+          retention-days: 30
+
+  build-ios:
+    name: 🍎 Build iOS IPA
+    needs: version-bump
+    runs-on: ubuntu-latest
+    if: >
+      (github.event.inputs.platform == 'ios' || github.event.inputs.platform == 'all') &&
+      secrets.EXPO_TOKEN != ''
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: 📦 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📥 Install dependencies
+        run: npm ci --workspace=mobile
+
+      - name: 🔧 Setup Expo & EAS CLI
+        run: |
+          npm install -g expo-cli
+          npm install -g eas-cli
+
+      - name: 🏗️ Build iOS IPA with EAS
+        run: |
+          cd mobile
+          npx eas-cli build --platform ios --profile preview --non-interactive --wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 📥 Download iOS artifact from EAS
+        id: download_ios
+        run: |
+          cd mobile
+          BUILD_URL=$(npx eas-cli build:list --platform ios --status finished --limit 1 --json --non-interactive | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'))[0].artifacts.buildUrl")
+          echo "Build URL: $BUILD_URL"
+
+          ARTIFACT_NAME="QuantoTa-${{ needs.version-bump.outputs.version }}.ipa"
+          curl -L -o "../$ARTIFACT_NAME" "$BUILD_URL"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+          echo "artifact_path=$(pwd)/../$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 📤 Upload IPA as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: ${{ steps.download_ios.outputs.artifact_path }}
+          retention-days: 30
+
+  release:
+    name: 🚀 Create GitHub Release
+    needs: [version-bump, build-android]
+    runs-on: ubuntu-latest
+    if: always() && needs.version-bump.result == 'success' && needs.build-android.result == 'success'
+    permissions:
+      contents: write
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: 📥 Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: ./artifacts
+
+      - name: 📥 Download iOS IPA (if available)
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-ipa
+          path: ./artifacts
+        continue-on-error: true
+
+      - name: 🏷️ Create Git Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ needs.version-bump.outputs.tag }}" -m "Release ${{ needs.version-bump.outputs.tag }}"
+          git push origin "${{ needs.version-bump.outputs.tag }}"
+
+      - name: 🚀 Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Generate release notes from commits since last tag
+          PREVIOUS_TAG=$(git tag --sort=-version:refname | head -2 | tail -1)
+
+          if [ -n "$PREVIOUS_TAG" ]; then
+            RELEASE_NOTES=$(git log "${PREVIOUS_TAG}..HEAD" --pretty=format:"- %s (%h)" --no-merges)
+          else
+            RELEASE_NOTES="🎉 Initial release!"
+          fi
+
+          # Build the release body
+          BODY="## 📱 QuantoTa? ${{ needs.version-bump.outputs.tag }}
+
+          ### 📋 Changes
+          ${RELEASE_NOTES}
+
+          ### 📦 Build Info
+          - **Version:** ${{ needs.version-bump.outputs.version }}
+          - **Version Code:** ${{ needs.version-bump.outputs.version_code }}
+          - **Build:** [GitHub Actions Run #${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ### 📥 Downloads
+          - 🤖 **Android APK** — Download below
+          - 🍎 **iOS IPA** — Download below (if available)"
+
+          # Create the release with assets
+          gh release create "${{ needs.version-bump.outputs.tag }}" \
+            --title "📱 QuantoTa? ${{ needs.version-bump.outputs.tag }}" \
+            --notes "$BODY" \
+            ./artifacts/*

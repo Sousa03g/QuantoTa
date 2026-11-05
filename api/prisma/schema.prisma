@@ -1,0 +1,152 @@
+// Prisma schema for QuantoTa? — Live football scores
+// Uses Neon serverless PostgreSQL driver
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL")
+}
+
+// ─── League ──────────────────────────────────────────────────────────────────
+
+model League {
+  id         Int        @id @default(autoincrement())
+  externalId Int        @unique
+  name       String
+  country    String
+  logo       String
+  type       String     // "league" or "cup"
+  season     Int
+  updatedAt  DateTime   @updatedAt
+
+  matches   Match[]
+  standings Standing[]
+
+  @@index([externalId])
+}
+
+// ─── Team ────────────────────────────────────────────────────────────────────
+
+model Team {
+  id         Int        @id @default(autoincrement())
+  externalId Int        @unique
+  name       String
+  shortName  String?
+  logo       String
+  country    String
+  founded    Int?
+  venue      String?
+  updatedAt  DateTime   @updatedAt
+
+  homeMatches Match[]      @relation("HomeTeam")
+  awayMatches Match[]      @relation("AwayTeam")
+  events      MatchEvent[]
+  players     Player[]
+  standings   Standing[]
+
+  @@index([externalId])
+}
+
+// ─── Match ───────────────────────────────────────────────────────────────────
+
+model Match {
+  id           Int          @id @default(autoincrement())
+  externalId   Int          @unique
+  leagueId     Int
+  homeTeamId   Int
+  awayTeamId   Int
+  homeScore    Int?
+  awayScore    Int?
+  status       String       // NS, 1H, HT, 2H, FT, AET, PEN, SUSP, PST, CANC, ABD, AWD, WO, LIVE
+  date         DateTime
+  minute       Int?
+  venue        String?
+  referee      String?
+  season       Int
+  updatedAt    DateTime     @updatedAt
+
+  league   League       @relation(fields: [leagueId], references: [id])
+  homeTeam Team         @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeam Team         @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  events   MatchEvent[]
+
+  @@index([externalId])
+  @@index([status])
+  @@index([date])
+  @@index([leagueId])
+  @@index([homeTeamId])
+  @@index([awayTeamId])
+}
+
+// ─── MatchEvent ──────────────────────────────────────────────────────────────
+
+model MatchEvent {
+  id          Int      @id @default(autoincrement())
+  matchId     Int
+  teamId      Int?
+  playerId    Int?
+  playerName  String?
+  type        String   // GOAL, CARD, SUBST, VAR
+  detail      String?
+  minute      Int
+  extraMinute Int?
+  createdAt   DateTime @default(now())
+
+  match Match @relation(fields: [matchId], references: [id])
+  team  Team? @relation(fields: [teamId], references: [id])
+
+  @@index([matchId])
+  @@index([teamId])
+}
+
+// ─── Player ──────────────────────────────────────────────────────────────────
+
+model Player {
+  id          Int      @id @default(autoincrement())
+  externalId  Int      @unique
+  name        String
+  photo       String?
+  nationality String?
+  position    String?
+  age         Int?
+  number      Int?
+  teamId      Int?
+  updatedAt   DateTime @updatedAt
+
+  team Team? @relation(fields: [teamId], references: [id])
+
+  @@index([externalId])
+  @@index([teamId])
+}
+
+// ─── Standing ────────────────────────────────────────────────────────────────
+
+model Standing {
+  id           Int      @id @default(autoincrement())
+  leagueId     Int
+  teamId       Int
+  rank         Int
+  points       Int
+  played       Int
+  wins         Int
+  draws        Int
+  losses       Int
+  goalsFor     Int
+  goalsAgainst Int
+  goalDiff     Int
+  form         String?
+  season       Int
+  updatedAt    DateTime @updatedAt
+
+  league League @relation(fields: [leagueId], references: [id])
+  team   Team   @relation(fields: [teamId], references: [id])
+
+  @@unique([leagueId, teamId, season])
+  @@index([leagueId])
+  @@index([teamId])
+}
