@@ -16,6 +16,33 @@ export interface MatchEvent {
   detail?: string;
 }
 
+export interface MatchStatItem {
+  name: string;
+  home: string;
+  away: string;
+  homeValue: number;
+  awayValue: number;
+}
+
+export interface MatchLineupPlayer {
+  id: number;
+  name: string;
+  position?: string;
+  shirtNumber?: number | null;
+  substitute?: boolean;
+}
+
+export interface MatchLineups {
+  home: {
+    formation?: string;
+    players: MatchLineupPlayer[];
+  };
+  away: {
+    formation?: string;
+    players: MatchLineupPlayer[];
+  };
+}
+
 export interface Match {
   id: number;
   externalId: number;
@@ -29,6 +56,8 @@ export interface Match {
   minute: number | null;
   venue?: string;
   events?: MatchEvent[];
+  statistics?: MatchStatItem[];
+  lineups?: MatchLineups;
 }
 
 export interface MatchesByLeague {
@@ -53,5 +82,5 @@ export async function getLiveMatches(): Promise<MatchesByLeague[]> {
 
 export async function getMatchById(id: number | string): Promise<Match> {
   const { data } = await api.get(`/matches/${id}`);
-  return data.match;
+  return data.match || data.data || data;
 }

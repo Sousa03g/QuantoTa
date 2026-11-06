@@ -9,6 +9,12 @@ export interface TeamDetail {
   country: string;
   founded?: number;
   venue?: string;
+  manager?: string;
+  colors?: {
+    primary?: string;
+    secondary?: string;
+    text?: string;
+  };
   players?: Array<{
     id: number;
     name: string;
