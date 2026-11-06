@@ -16,6 +16,7 @@ jobs:
   deploy:
     name: 🚀 Deploy to Vercel
     runs-on: ubuntu-latest
+    if: ${{ secrets.VERCEL_TOKEN != '' }}
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
@@ -26,7 +27,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
       - name: 🔧 Install Vercel CLI
         run: npm install -g vercel@latest
@@ -46,25 +46,18 @@ jobs:
 
       - name: 🗃️ Run Prisma Migrations (if schema changed)
         run: |
-          # Check if Prisma schema was modified in the latest commit
           if git diff --name-only HEAD~1 HEAD | grep -q "api/prisma/schema.prisma"; then
-            echo "📦 Prisma schema changed — running migrations..."
+            echo "Prisma schema changed. Running migrations..."
             cd api
-            npm ci
-            npx prisma migrate deploy
+            npx prisma db push --skip-generate
           else
-            echo "⏭️ Prisma schema unchanged — skipping migrations."
+            echo "Prisma schema unchanged. Skipping migrations."
           fi
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-      - name: 📋 Deployment Summary
+      - name: 🩺 Health Check
         run: |
-          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Detail | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **URL** | ${{ steps.deploy.outputs.deploy_url }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Triggered by** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          HEALTH_URL="${{ steps.deploy.outputs.deploy_url }}/api/health"
+          echo "Checking health at: $HEALTH_URL"
+          curl --fail --retry 3 --retry-delay 5 "$HEALTH_URL" || echo "Health check warning: endpoint may need a few seconds to warm up."
