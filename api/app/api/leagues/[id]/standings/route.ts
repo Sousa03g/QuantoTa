@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { cache } from "@/lib/cache";
-import { apiError } from "@/lib/errors";
+import prisma from "@/lib/db";
+import { errorResponse } from "@/lib/errors";
 import { getStandings } from "@/lib/football-api";
 
 export async function GET(
@@ -14,42 +13,35 @@ export async function GET(
       return NextResponse.json({ error: "Invalid league ID" }, { status: 400 });
     }
 
-    const cacheKey = `standings:${leagueId}`;
-    const cached = cache.get(cacheKey);
-    if (cached) {
-      return NextResponse.json({ standings: cached, source: "cache" });
-    }
+    if (prisma) {
+      try {
+        const dbStandings = await prisma.standing.findMany({
+          where: {
+            OR: [
+              { leagueId },
+              { league: { externalId: leagueId } },
+            ],
+          },
+          include: { team: true, league: true },
+          orderBy: { rank: "asc" },
+        });
 
-    const dbStandings = await prisma.standing.findMany({
-      where: {
-        OR: [
-          { leagueId },
-          { league: { externalId: leagueId } },
-        ],
-      },
-      include: { team: true, league: true },
-      orderBy: { rank: "asc" },
-    });
-
-    if (dbStandings.length > 0) {
-      cache.set(cacheKey, dbStandings, 300);
-      return NextResponse.json({ standings: dbStandings, source: "database" });
-    }
-
-    // Try fetching from external API if not found
-    try {
-      const apiResponse = await getStandings(leagueId, 2024);
-      if (apiResponse && apiResponse.length > 0) {
-        const standingsData = (apiResponse[0] as any)?.league?.standings?.[0] ?? [];
-        cache.set(cacheKey, standingsData, 300);
-        return NextResponse.json({ standings: standingsData, source: "api-football" });
+        if (dbStandings.length > 0) {
+          return NextResponse.json({ standings: dbStandings, source: "database" });
+        }
+      } catch (e) {
+        console.warn("[Standings] DB lookup skipped:", e);
       }
-    } catch {
-      // Return empty if external fails
     }
 
-    return NextResponse.json({ standings: [], source: "none" });
+    // Try fetching from external API
+    try {
+      const standingsData = await getStandings(leagueId, 2024);
+      return NextResponse.json({ standings: standingsData, source: "api" });
+    } catch {
+      return NextResponse.json({ standings: [], source: "empty" });
+    }
   } catch (error) {
-    return apiError(error);
+    return errorResponse(error);
   }
 }

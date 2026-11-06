@@ -7,7 +7,6 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import * as cache from "@/lib/cache";
 import * as footballApi from "@/lib/football-api";
 import { NotFoundError, errorResponse } from "@/lib/errors";
 
@@ -21,49 +20,39 @@ export async function GET(
       throw new NotFoundError("Match", params.id);
     }
 
-    const cacheKey = `match:${id}`;
-    const cached = cache.get<unknown>(cacheKey);
-    if (cached) {
-      return NextResponse.json({ data: cached });
-    }
+    let match: any = null;
 
-    // Try to find by internal id first, then by externalId
-    let match = await prisma.match.findFirst({
-      where: { OR: [{ id }, { externalId: id }] },
-      include: {
-        league: true,
-        homeTeam: true,
-        awayTeam: true,
-        events: {
-          include: { team: true },
-          orderBy: [{ minute: "asc" }, { extraMinute: "asc" }],
-        },
-      },
-    });
-
-    // If not found locally, try fetching from API-Football
-    if (!match) {
-      const apiData = (await footballApi.getFixtureById(id)) as Record<
-        string,
-        unknown
-      >[];
-
-      if (!apiData || apiData.length === 0) {
-        throw new NotFoundError("Match", id);
+    if (prisma) {
+      try {
+        match = await prisma.match.findFirst({
+          where: { OR: [{ id }, { externalId: id }] },
+          include: {
+            league: true,
+            homeTeam: true,
+            awayTeam: true,
+            events: {
+              include: { team: true },
+              orderBy: [{ minute: "asc" }, { extraMinute: "asc" }],
+            },
+          },
+        });
+      } catch (e) {
+        console.warn("[Match ID] DB lookup skipped:", e);
       }
-
-      // We won't auto-upsert here — just return the raw API data
-      // The sync endpoint handles persistence.
-      const rawFixture = apiData[0];
-      cache.set(cacheKey, rawFixture, cache.TTL.LIVE);
-      return NextResponse.json({ data: rawFixture, source: "api-football" });
     }
 
-    // Determine TTL based on match status
-    const isLive = ["1H", "2H", "HT", "LIVE"].includes(match.status);
-    cache.set(cacheKey, match, isLive ? 30 : cache.TTL.LIVE);
+    if (!match) {
+      match = await footballApi.getFixtureById(id);
+    }
 
-    return NextResponse.json({ data: match });
+    if (!match) {
+      throw new NotFoundError("Match", id);
+    }
+
+    return NextResponse.json({
+      match,
+      data: match,
+    });
   } catch (error) {
     return errorResponse(error);
   }

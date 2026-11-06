@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { cache } from "@/lib/cache";
-import { apiError } from "@/lib/errors";
+import prisma from "@/lib/db";
+import { errorResponse } from "@/lib/errors";
+import * as footballApi from "@/lib/football-api";
 
 export async function GET(
   _request: NextRequest,
@@ -13,43 +13,42 @@ export async function GET(
       return NextResponse.json({ error: "Invalid team ID" }, { status: 400 });
     }
 
-    const cacheKey = `team:${id}`;
-    const cached = cache.get(cacheKey);
-    if (cached) {
-      return NextResponse.json({ team: cached, source: "cache" });
+    if (prisma) {
+      try {
+        const team = await prisma.team.findFirst({
+          where: { OR: [{ id }, { externalId: id }] },
+          include: {
+            players: {
+              orderBy: { name: "asc" },
+            },
+            homeMatches: {
+              take: 5,
+              orderBy: { date: "desc" },
+              include: { league: true, homeTeam: true, awayTeam: true },
+            },
+            awayMatches: {
+              take: 5,
+              orderBy: { date: "desc" },
+              include: { league: true, homeTeam: true, awayTeam: true },
+            },
+          },
+        });
+
+        if (team) {
+          return NextResponse.json({ team, source: "database" });
+        }
+      } catch (e) {
+        console.warn("[Team ID] DB lookup skipped:", e);
+      }
     }
 
-    const team = await prisma.team.findFirst({
-      where: { OR: [{ id }, { externalId: id }] },
-      include: {
-        players: {
-          orderBy: { name: "asc" },
-        },
-        homeMatches: {
-          take: 5,
-          orderBy: { date: "desc" },
-          include: { league: true, homeTeam: true, awayTeam: true },
-        },
-        awayMatches: {
-          take: 5,
-          orderBy: { date: "desc" },
-          include: { league: true, homeTeam: true, awayTeam: true },
-        },
-        standings: {
-          include: { league: true },
-          orderBy: { season: "desc" },
-          take: 1,
-        },
-      },
-    });
-
-    if (!team) {
-      return NextResponse.json({ error: "Team not found" }, { status: 404 });
+    const apiTeam = await footballApi.getTeam(id);
+    if (apiTeam?.team) {
+      return NextResponse.json({ team: apiTeam.team, source: "api" });
     }
 
-    cache.set(cacheKey, team, 1800);
-    return NextResponse.json({ team, source: "database" });
+    return NextResponse.json({ error: "Team not found" }, { status: 404 });
   } catch (error) {
-    return apiError(error);
+    return errorResponse(error);
   }
 }

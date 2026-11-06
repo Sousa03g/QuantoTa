@@ -1,43 +1,43 @@
-import { NextResponse } from "next/js";
-import { prisma } from "@/lib/db";
-import { cache } from "@/lib/cache";
-import { apiError } from "@/lib/errors";
+/**
+ * @file app/api/leagues/route.ts
+ */
 
-const TRACKED_LEAGUE_IDS = [71, 39, 140, 135, 78, 61, 2, 13, 73];
+import { NextResponse } from "next/server";
+import prisma from "@/lib/db";
+import * as footballApi from "@/lib/football-api";
+import { errorResponse } from "@/lib/errors";
 
 export async function GET() {
   try {
-    const cacheKey = "leagues:all";
-    const cached = cache.get(cacheKey);
-    if (cached) {
-      return NextResponse.json({ leagues: cached, source: "cache" });
+    if (prisma) {
+      try {
+        const leagues = await prisma.league.findMany({
+          orderBy: { name: "asc" },
+        });
+        if (leagues.length > 0) {
+          return NextResponse.json({ leagues, source: "database" });
+        }
+      } catch (e) {
+        console.warn("[Leagues] DB lookup skipped:", e);
+      }
     }
 
-    const leagues = await prisma.league.findMany({
-      orderBy: { name: "asc" },
+    const rawLeagues = await footballApi.getLeagues();
+    const leagues = rawLeagues.map((item: any) => {
+      const l = item.league || item;
+      return {
+        id: l.id,
+        externalId: l.id,
+        name: l.name,
+        country: item.country?.name || l.country || "Mundo",
+        logo: l.logo || `https://img.sofascore.com/api/v1/unique-tournament/${l.id}/image`,
+        type: l.type || "league",
+        season: 2024,
+      };
     });
 
-    if (leagues.length > 0) {
-      cache.set(cacheKey, leagues, 3600);
-      return NextResponse.json({ leagues, source: "database" });
-    }
-
-    // Default fallback leagues if DB is not seeded yet
-    const defaultLeagues = [
-      { id: 1, externalId: 71, name: "Brasileirão Série A", country: "Brazil", logo: "https://media.api-sports.io/football/leagues/71.png", type: "league", season: 2024 },
-      { id: 2, externalId: 39, name: "Premier League", country: "England", logo: "https://media.api-sports.io/football/leagues/39.png", type: "league", season: 2024 },
-      { id: 3, externalId: 140, name: "La Liga", country: "Spain", logo: "https://media.api-sports.io/football/leagues/140.png", type: "league", season: 2024 },
-      { id: 4, externalId: 135, name: "Serie A", country: "Italy", logo: "https://media.api-sports.io/football/leagues/135.png", type: "league", season: 2024 },
-      { id: 5, externalId: 78, name: "Bundesliga", country: "Germany", logo: "https://media.api-sports.io/football/leagues/78.png", type: "league", season: 2024 },
-      { id: 6, externalId: 61, name: "Ligue 1", country: "France", logo: "https://media.api-sports.io/football/leagues/61.png", type: "league", season: 2024 },
-      { id: 7, externalId: 2, name: "UEFA Champions League", country: "World", logo: "https://media.api-sports.io/football/leagues/2.png", type: "cup", season: 2024 },
-      { id: 8, externalId: 13, name: "Copa Libertadores", country: "South America", logo: "https://media.api-sports.io/football/leagues/13.png", type: "cup", season: 2024 },
-      { id: 9, externalId: 73, name: "Copa do Brasil", country: "Brazil", logo: "https://media.api-sports.io/football/leagues/73.png", type: "cup", season: 2024 },
-    ];
-
-    cache.set(cacheKey, defaultLeagues, 3600);
-    return NextResponse.json({ leagues: defaultLeagues, source: "defaults" });
+    return NextResponse.json({ leagues, source: "api" });
   } catch (error) {
-    return apiError(error);
+    return errorResponse(error);
   }
 }

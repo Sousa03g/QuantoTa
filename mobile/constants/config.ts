@@ -1,13 +1,13 @@
 const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000/api";
+  process.env.EXPO_PUBLIC_API_URL ?? "https://api-theta-red-63.vercel.app/api";
 
 export const config = {
   apiBaseUrl: API_BASE_URL,
   cache: {
-    /** Stale time for live-updating queries (30 seconds) */
-    liveStaleTime: 30 * 1000,
-    /** Refetch interval for live scores (30 seconds) */
-    liveRefetchInterval: 30 * 1000,
+    /** Stale time for live-updating queries (15 seconds) */
+    liveStaleTime: 15 * 1000,
+    /** Refetch interval for live scores (15 seconds) */
+    liveRefetchInterval: 15 * 1000,
     /** Stale time for static data like standings (5 minutes) */
     staticStaleTime: 5 * 60 * 1000,
     /** Stale time for match list queries (2 minutes) */

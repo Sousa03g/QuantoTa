@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import prisma from "@/lib/db";
 import { getLiveFixtures } from "@/lib/football-api";
-import { cache } from "@/lib/cache";
+import * as cache from "@/lib/cache";
 
-/**
- * Cron sync endpoint called every 5 minutes by Vercel Cron.
- * Syncs currently live matches and updates the database.
- */
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get("authorization");
@@ -19,88 +15,89 @@ export async function POST(request: NextRequest) {
     const liveFixtures = await getLiveFixtures();
     let updatedCount = 0;
 
-    for (const item of (liveFixtures as any[])) {
-      const { fixture, teams, goals } = item;
-      const externalId = fixture.id;
+    if (prisma) {
+      for (const item of (liveFixtures as any[])) {
+        try {
+          const { fixture, teams, goals, league } = item;
+          if (!fixture || !teams?.home || !teams?.away) continue;
 
-      // Upsert home team
-      const homeTeam = await prisma.team.upsert({
-        where: { externalId: teams.home.id },
-        update: { name: teams.home.name, logo: teams.home.logo },
-        create: {
-          externalId: teams.home.id,
-          name: teams.home.name,
-          logo: teams.home.logo,
-          country: "Unknown",
-        },
-      });
+          const homeTeam = await prisma.team.upsert({
+            where: { externalId: teams.home.id },
+            update: { name: teams.home.name, logo: teams.home.logo },
+            create: {
+              externalId: teams.home.id,
+              name: teams.home.name,
+              logo: teams.home.logo,
+              country: "Unknown",
+            },
+          });
 
-      // Upsert away team
-      const awayTeam = await prisma.team.upsert({
-        where: { externalId: teams.away.id },
-        update: { name: teams.away.name, logo: teams.away.logo },
-        create: {
-          externalId: teams.away.id,
-          name: teams.away.name,
-          logo: teams.away.logo,
-          country: "Unknown",
-        },
-      });
+          const awayTeam = await prisma.team.upsert({
+            where: { externalId: teams.away.id },
+            update: { name: teams.away.name, logo: teams.away.logo },
+            create: {
+              externalId: teams.away.id,
+              name: teams.away.name,
+              logo: teams.away.logo,
+              country: "Unknown",
+            },
+          });
 
-      // Upsert league
-      const league = await prisma.league.upsert({
-        where: { externalId: item.league.id },
-        update: { name: item.league.name, logo: item.league.logo },
-        create: {
-          externalId: item.league.id,
-          name: item.league.name,
-          logo: item.league.logo,
-          country: item.league.country || "World",
-          type: "league",
-          season: item.league.season || 2024,
-        },
-      });
+          let dbLeague = null;
+          if (league?.id) {
+            dbLeague = await prisma.league.upsert({
+              where: { externalId: league.id },
+              update: { name: league.name, logo: league.logo },
+              create: {
+                externalId: league.id,
+                name: league.name,
+                country: league.country || "Mundo",
+                logo: league.logo || "",
+                type: "league",
+                season: 2024,
+              },
+            });
+          }
 
-      // Upsert match
-      await prisma.match.upsert({
-        where: { externalId },
-        update: {
-          homeScore: goals.home,
-          awayScore: goals.away,
-          status: fixture.status.short,
-          minute: fixture.status.elapsed,
-        },
-        create: {
-          externalId,
-          leagueId: league.id,
-          homeTeamId: homeTeam.id,
-          awayTeamId: awayTeam.id,
-          homeScore: goals.home,
-          awayScore: goals.away,
-          status: fixture.status.short,
-          minute: fixture.status.elapsed,
-          date: new Date(fixture.date),
-          season: item.league.season || 2024,
-        },
-      });
-
-      updatedCount++;
+          if (dbLeague) {
+            await prisma.match.upsert({
+              where: { externalId: fixture.id },
+              update: {
+                homeScore: goals.home ?? 0,
+                awayScore: goals.away ?? 0,
+                status: fixture.status?.short || "LIVE",
+                minute: fixture.status?.elapsed ?? null,
+              },
+              create: {
+                externalId: fixture.id,
+                leagueId: dbLeague.id,
+                homeTeamId: homeTeam.id,
+                awayTeamId: awayTeam.id,
+                homeScore: goals.home ?? 0,
+                awayScore: goals.away ?? 0,
+                status: fixture.status?.short || "LIVE",
+                date: new Date(fixture.date),
+                minute: fixture.status?.elapsed ?? null,
+                season: 2024,
+              },
+            });
+            updatedCount++;
+          }
+        } catch {
+          // ignore single item failure
+        }
+      }
     }
 
-    // Invalidate live matches cache
-    cache.del("matches:live");
+    cache.set("fixtures:live", liveFixtures, 15);
 
     return NextResponse.json({
-      status: "synced",
-      matchesUpdated: updatedCount,
-      timestamp: new Date().toISOString(),
+      success: true,
+      syncedAt: new Date().toISOString(),
+      liveMatchesCount: liveFixtures.length,
+      updatedInDb: updatedCount,
     });
   } catch (error: any) {
-    console.error("Sync error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-}
-
-export async function GET(request: NextRequest) {
-  return POST(request);
 }

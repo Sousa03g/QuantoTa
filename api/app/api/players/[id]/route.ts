@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { cache } from "@/lib/cache";
-import { apiError } from "@/lib/errors";
+import prisma from "@/lib/db";
+import { errorResponse } from "@/lib/errors";
 
 export async function GET(
   _request: NextRequest,
@@ -13,26 +12,25 @@ export async function GET(
       return NextResponse.json({ error: "Invalid player ID" }, { status: 400 });
     }
 
-    const cacheKey = `player:${id}`;
-    const cached = cache.get(cacheKey);
-    if (cached) {
-      return NextResponse.json({ player: cached, source: "cache" });
+    if (prisma) {
+      try {
+        const player = await prisma.player.findFirst({
+          where: { OR: [{ id }, { externalId: id }] },
+          include: {
+            team: true,
+          },
+        });
+
+        if (player) {
+          return NextResponse.json({ player, source: "database" });
+        }
+      } catch (e) {
+        console.warn("[Player ID] DB lookup skipped:", e);
+      }
     }
 
-    const player = await prisma.player.findFirst({
-      where: { OR: [{ id }, { externalId: id }] },
-      include: {
-        team: true,
-      },
-    });
-
-    if (!player) {
-      return NextResponse.json({ error: "Player not found" }, { status: 404 });
-    }
-
-    cache.set(cacheKey, player, 3600);
-    return NextResponse.json({ player, source: "database" });
+    return NextResponse.json({ error: "Player not found" }, { status: 404 });
   } catch (error) {
-    return apiError(error);
+    return errorResponse(error);
   }
 }
